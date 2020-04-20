@@ -39,3 +39,4 @@ build/Makefile
 build/test
 build/.cmake
 .vscode
+zt_lua_wrap.code-workspace
