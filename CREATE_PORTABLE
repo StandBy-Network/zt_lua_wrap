@@ -1,0 +1,9 @@
+path=$1
+if [ ! -d "$path" ]; then
+    mkdir $path
+fi
+ext_path="ext/libzt/lib/release/linux-x86_64"
+cp build/test $ext_path/libzt.so $path
+echo "export LD_LIBRARY_PATH=\"./\":\$LD_LIBRARY_PATH" >> $path/RUN
+echo "./test" >> $path/RUN
+sudo chmod a+x $path/RUN

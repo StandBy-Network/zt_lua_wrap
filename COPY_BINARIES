@@ -1,0 +1,16 @@
+path=$1
+debug=$2
+
+conf=""
+if [ "$debug" == "d" ]; then
+    conf="debug"
+else
+    conf="release"
+fi
+
+if [ ! -d "$path" ]; then
+    mkdir $path
+fi
+
+ext_path="./ext/libzt/lib/$conf/linux-x86_64"
+cp build/test $ext_path/libzt.so $path
