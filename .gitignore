@@ -31,12 +31,6 @@
 *.out
 *.app
 
-build/CMakeFiles
-build/cmake_install.cmake
-build/CMakeCache.txt
-build/lua_wrapper
-build/Makefile
-build/test
-build/.cmake
+build
 .vscode
 zt_lua_wrap.code-workspace
