@@ -28,7 +28,7 @@ SOFTWARE. */
 namespace zt_lua
 {
 
-auto start() -> void;
+auto start(uint64_t network_id) -> void;
 auto stop() -> void;
 
 auto register_wrappers(lua_State *l) -> void;

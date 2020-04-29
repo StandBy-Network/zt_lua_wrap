@@ -27,6 +27,7 @@ SOFTWARE. */
 #include <thread>
 #include <queue>
 #include <iostream>
+#include <sstream>
 
 #include <string.h>
 #include <unistd.h>
@@ -40,13 +41,6 @@ namespace zt_lua
 using msg_map_t = std::map<uint64_t, std::queue<std::string>>;
 using thread_vec_t = std::vector<std::thread>;
 
-std::mutex address_map_mut;
-std::map<uint64_t, const char *> address_map
-{
-    std::make_pair(0x8AFEBC1AEA, "192.168.196.8"),
-    std::make_pair(0xBEAC871731, "192.168.196.159")
-};
-
 std::mutex msg_map_mut;
 msg_map_t msg_map;
 
@@ -58,6 +52,8 @@ constexpr int MSG_MAX_LENGTH = 10000;
 constexpr int PORT = 9000;
 
 bool run = false;
+
+uint64_t network_id;
 
 auto register_wrappers(lua_State *l) -> void
 {
@@ -93,28 +89,41 @@ auto pop_msg(uint64_t node_id) -> std::optional<std::string>
     }
 }
 
-auto id_to_addr(uint64_t node_id) -> const char *
+auto id_to_addr_str(uint64_t node_id) -> std::string
 {
-    try
+    std::stringstream ss;
+    ss << "fd" << network_id << "9993" << node_id;
+    std::string out;
+    for(int i = 0; i < ss.str().length(); i++)
     {
-        return address_map.at(node_id);
-    }
-    catch(const std::out_of_range &)
-    {
-        return nullptr;
-    }
-}
-
-auto addr_to_id(const char *addr) -> std::optional<uint64_t>
-{
-    for(auto &p : address_map)
-    {
-        if(!strcmp(p.second, addr))
+        out.push_back(ss.str()[i]);
+        if(i % 4 == 3)
         {
-            return p.first;
+            out.push_back(':');
         }
     }
-    return std::nullopt;
+
+    return out;
+}
+
+auto addr_str_to_id(const std::string addr) -> uint64_t
+{
+    std::string no_colons;
+    for(int i = 0; i < addr.length(); i++)
+    {
+        if(addr[i] != ':')
+        {
+            no_colons.push_back(addr[i]);
+        }
+    }
+
+    std::string id_string;
+    for(int i = 22; i < no_colons.length(); i++)
+    {
+        id_string.push_back(no_colons[i]);
+    }
+
+    return std::stoull(id_string, 0, 16);
 }
 
 auto addr_to_string(zts_sockaddr_in *addr) -> const std::string
@@ -191,7 +200,7 @@ auto listener() -> void
                 std::lock_guard lock(msg_map_mut);
                 std::string s = addr_to_string(&addr);
                 std::cout << s << std::endl;
-                push_msg(addr_to_id(addr_to_string(&addr).c_str()).value(), lstring_to_string(msg, recvd));
+                push_msg(addr_str_to_id(addr_to_string(&addr).c_str()).value(), lstring_to_string(msg, recvd));
             }
             zts_close(acc_fd);
         });
@@ -199,21 +208,28 @@ auto listener() -> void
     zts_close(recv_fd);
 }
 
-auto start() -> void
+auto start(uint64_t nwid) -> void
 {
-    run = true;
-    threads.emplace_back(listener);
+    if(!run)
+    {
+        network_id = nwid;
+        run = true;
+        threads.emplace_back(listener);
+    }
 }
 
 auto stop() -> void
 {
-    run = false;
-    std::lock_guard lock(threads_mut);
-    for(auto &t : threads)
+    if(run)
     {
-        if(t.joinable())
+        run = false;
+        std::lock_guard lock(threads_mut);
+        for(auto &t : threads)
         {
-            t.join();
+            if(t.joinable())
+            {
+                t.join();
+            }
         }
     }
 }
@@ -236,7 +252,7 @@ auto send(lua_State *l) -> int
             }
             int max_tries = 10;
             int tries = 0;
-            zts_sockaddr_in addr = string_to_addr(id_to_addr(node_id));
+            zts_sockaddr_in addr = string_to_addr(id_to_addr_str(node_id));
             addr.sin_family = ZTS_AF_INET6;
             addr.sin_port = htons(PORT);
             // connect
