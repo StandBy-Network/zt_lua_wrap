@@ -5,7 +5,7 @@ project(lua_wrapper)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "--std=c++17 -g -pthread")
 
-set(SOURCES lib/zt_lua_wrap.cc)
+set(SOURCES lib/zt_lua_wrap.cc lib/config_reader.cc)
 set(TEST_SOURCES app/test.cc)
 
 add_library(zt_lua_wrap STATIC ${SOURCES})

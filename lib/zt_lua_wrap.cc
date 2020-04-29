@@ -69,7 +69,7 @@ auto register_wrappers(lua_State *l) -> void
 
 auto create_sock() -> int
 {
-    return zts_socket(ZTS_PF_INET, ZTS_SOCK_STREAM, ZTS_IPPROTO_TCP);
+    return zts_socket(ZTS_PF_INET6, ZTS_SOCK_STREAM, 0);
 }
 
 auto push_msg(const uint64_t node_id, const std::string &msg) -> void
@@ -120,7 +120,7 @@ auto addr_to_id(const char *addr) -> std::optional<uint64_t>
 auto addr_to_string(zts_sockaddr_in *addr) -> const std::string
 {
     char ad[INET_ADDRSTRLEN];
-    inet_ntop(ZTS_AF_INET, &(addr->sin_addr), ad, INET_ADDRSTRLEN);
+    inet_ntop(ZTS_AF_INET6, &(addr->sin_addr), ad, INET6_ADDRSTRLEN);
     std::string s(ad);
 
     return s;
@@ -129,7 +129,7 @@ auto addr_to_string(zts_sockaddr_in *addr) -> const std::string
 auto string_to_addr(const std::string str) -> zts_sockaddr_in
 {
     zts_sockaddr_in addr;
-    inet_pton(ZTS_AF_INET, str.c_str(), &addr.sin_addr);
+    inet_pton(ZTS_AF_INET6, str.c_str(), &addr.sin_addr);
     return addr;
 }
 
@@ -154,8 +154,8 @@ auto listener() -> void
         return;
     }
 
-    zts_sockaddr_in addr = string_to_addr("0.0.0.0");
-    addr.sin_family = ZTS_AF_INET;
+    zts_sockaddr_in addr = string_to_addr("::");
+    addr.sin_family = ZTS_AF_INET6;
     addr.sin_port = htons(PORT);
     if(zts_bind(recv_fd, (const sockaddr *)&addr, sizeof(addr)) < 0)
     {
@@ -237,7 +237,7 @@ auto send(lua_State *l) -> int
             int max_tries = 10;
             int tries = 0;
             zts_sockaddr_in addr = string_to_addr(id_to_addr(node_id));
-            addr.sin_family = ZTS_AF_INET;
+            addr.sin_family = ZTS_AF_INET6;
             addr.sin_port = htons(PORT);
             // connect
             for(; tries < max_tries; tries++)

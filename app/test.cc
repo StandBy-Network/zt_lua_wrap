@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
 #include <iostream>
+#include <fstream>
 
 #include <unistd.h>
 #include <signal.h>
@@ -29,6 +30,7 @@ SOFTWARE. */
 #include <ZeroTier.h>
 
 #include <zt_lua_wrap.h>
+#include <config_reader.h>
 
 static int node_ready = false, network_ready = false;
 
@@ -52,8 +54,8 @@ auto callback_func(zts_callback_msg *msg)
     }
     if(msg->eventCode == ZTS_EVENT_NETWORK_READY_IP4)
     {
-        std::cout << "Network ready for IP4" << std::endl;
-        network_ready = true;
+        std::cout << "Network ready for IP4. We don't care, we wait for IPv6" << std::endl;
+        //network_ready = true;
         return;
     }
     if(msg->eventCode == ZTS_EVENT_NETWORK_READY_IP6)
@@ -79,7 +81,7 @@ namespace
 
 static constexpr int PORT = 9000;
 
-}
+} // namespace 
 
 auto ctrl_c_handler(int signal) -> void
 {
@@ -87,35 +89,48 @@ auto ctrl_c_handler(int signal) -> void
     exit(1);
 }
 
-auto main() -> int
+auto main(int argc, char *argv[]) -> int
 {
+    if(argc != 2)
+    {
+        std::cerr << "Please specify the path to the config file as the only argument" << std::endl;
+        return 1;
+    }
+
     struct sigaction sig;
     sig.sa_handler = ctrl_c_handler;
     sigaction(SIGINT, &sig, nullptr);
 
-    std::cout << "Starting" << std::endl;
-    zts_start("zt_runtime", callback_func, ZTS_DEFAULT_PORT);
-    while(!node_ready) { sleep(1); }
+    const char *conf_path = argv[1];
+    std::ifstream conf(conf_path);
 
-    std::cout << "Joining" << std::endl;
-    uint64_t nwid = 0x93afae59635ebb07;
-    zts_join(nwid);
-    while(!network_ready) { sleep(1); }
-    
-
-    zt_lua::start();
-
-    lua_State *l = luaL_newstate();
-    zt_lua::register_wrappers(l);
-    luaL_openlibs(l);
-
-    if(luaL_dofile(l, "lua.lua"))
+    if(conf.good())
     {
-        std::cerr << "Couldn't do lua file" << std::endl;
-    }
+        std::map<std::string, std::string> conf_map = zt_lua::read_conf(conf);
+        std::cout << "Starting" << std::endl;
+        zts_start("zt_runtime", callback_func, ZTS_DEFAULT_PORT);
+        while(!node_ready) { sleep(1); }
 
-    zt_lua::stop();
-    zts_stop();
+        std::cout << "Joining" << std::endl;
+        uint64_t nwid = std::stoull(conf_map["network_id"]);
+        zts_join(nwid);
+        while(!network_ready) { sleep(1); }
+        
+
+        zt_lua::start();
+
+        lua_State *l = luaL_newstate();
+        zt_lua::register_wrappers(l);
+        luaL_openlibs(l);
+
+        if(luaL_dofile(l, "lua.lua"))
+        {
+            std::cerr << "Couldn't do lua file" << std::endl;
+        }
+
+        zt_lua::stop();
+        zts_stop();
+    }
 
     return 0;
 }
