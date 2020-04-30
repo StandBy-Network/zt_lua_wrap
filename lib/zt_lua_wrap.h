@@ -23,6 +23,8 @@ SOFTWARE. */
 #ifndef _ZT_LUA_WRAP_H_
 #define _ZT_LUA_WRAP_H_
 
+#include <bits/stdint-uintn.h>
+
 #include <lua.hpp>
 
 namespace zt_lua

@@ -117,7 +117,7 @@ auto main(int argc, char *argv[]) -> int
         while(!network_ready) { sleep(1); }
         
 
-        zt_lua::start();
+        zt_lua::start(nwid);
 
         lua_State *l = luaL_newstate();
         zt_lua::register_wrappers(l);

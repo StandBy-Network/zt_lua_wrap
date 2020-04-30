@@ -126,19 +126,19 @@ auto addr_str_to_id(const std::string addr) -> uint64_t
     return std::stoull(id_string, 0, 16);
 }
 
-auto addr_to_string(zts_sockaddr_in *addr) -> const std::string
+auto addr_to_string(zts_sockaddr_in6 *addr) -> const std::string
 {
-    char ad[INET_ADDRSTRLEN];
-    inet_ntop(ZTS_AF_INET6, &(addr->sin_addr), ad, INET6_ADDRSTRLEN);
+    char ad[INET6_ADDRSTRLEN];
+    inet_ntop(ZTS_AF_INET6, &(addr->sin6_addr), ad, INET6_ADDRSTRLEN);
     std::string s(ad);
 
     return s;
 }
 
-auto string_to_addr(const std::string str) -> zts_sockaddr_in
+auto string_to_addr(const std::string str) -> zts_sockaddr_in6
 {
-    zts_sockaddr_in addr;
-    inet_pton(ZTS_AF_INET6, str.c_str(), &addr.sin_addr);
+    zts_sockaddr_in6 addr;
+    inet_pton(ZTS_AF_INET6, str.c_str(), &addr.sin6_addr);
     return addr;
 }
 
@@ -155,6 +155,9 @@ auto lstring_to_string(const char *lstr, int len) -> const std::string
 
 auto listener() -> void
 {
+    // This lock in my opinion/theoretically guarantees, that no one is going to be able to manipulate the 
+    // threads vector until this function returns, if they use the mutex anyway, and that means, until 
+    // zt_lua::stop() is called;
     std::lock_guard lock(threads_mut);
     int recv_fd;
     if((recv_fd = create_sock()) < 0)
@@ -163,9 +166,9 @@ auto listener() -> void
         return;
     }
 
-    zts_sockaddr_in addr = string_to_addr("::");
-    addr.sin_family = ZTS_AF_INET6;
-    addr.sin_port = htons(PORT);
+    zts_sockaddr_in6 addr = string_to_addr("::");
+    addr.sin6_family = ZTS_AF_INET6;
+    addr.sin6_port = htons(PORT);
     if(zts_bind(recv_fd, (const sockaddr *)&addr, sizeof(addr)) < 0)
     {
         std::cerr << "Couldn't bind to \"any_address\"" << std::endl;
@@ -182,7 +185,7 @@ auto listener() -> void
 
     while(run)
     {
-        zts_sockaddr_in addr;
+        zts_sockaddr_in6 addr;
         int addr_len;
         int acc_fd;
         if((acc_fd = zts_accept(recv_fd, (sockaddr *)&addr, (socklen_t *)&addr_len)) < 0)
@@ -200,7 +203,7 @@ auto listener() -> void
                 std::lock_guard lock(msg_map_mut);
                 std::string s = addr_to_string(&addr);
                 std::cout << s << std::endl;
-                push_msg(addr_str_to_id(addr_to_string(&addr).c_str()).value(), lstring_to_string(msg, recvd));
+                push_msg(addr_str_to_id(addr_to_string(&addr).c_str()), lstring_to_string(msg, recvd));
             }
             zts_close(acc_fd);
         });
@@ -252,9 +255,9 @@ auto send(lua_State *l) -> int
             }
             int max_tries = 10;
             int tries = 0;
-            zts_sockaddr_in addr = string_to_addr(id_to_addr_str(node_id));
-            addr.sin_family = ZTS_AF_INET6;
-            addr.sin_port = htons(PORT);
+            zts_sockaddr_in6 addr = string_to_addr(id_to_addr_str(node_id));
+            addr.sin6_family = ZTS_AF_INET6;
+            addr.sin6_port = htons(PORT);
             // connect
             for(; tries < max_tries; tries++)
             {
