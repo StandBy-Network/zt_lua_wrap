@@ -20,12 +20,23 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. ]]
 
---[[ send(0x8AFEBC1AEA, "Szia")
-repeat
-    len, msg = recv(0x8AFEBC1AEA)
-until len == -1
-print(msg) ]]
+-- First receive
+--[[ repeat
+    size, msg = recv(0X98646573D4)
+    print("received " .. msg .. "size " .. tostring(size))
+    send(0X98646573D4, "pong")
+    print("sent pong")
+until size ~= -1 ]]
 
-size, msg = recv(0x8AFEBC1AEA)
-print(size)
-send(0x8AFEBC1AEA, "Hat szia")
+for i = 0, 49999, 1 do
+    size, msg = recv(0X98646573D4)
+    print("received " .. msg .. " size " .. tostring(size))
+end
+
+--The other side
+--[[ repeat
+    send(0xFA2037EAE9, "ping")
+    print("sent ping")
+    size, msg = recv(0xFA2037EAE9)
+    print("received " .. msg .. "size " .. tostring(size))
+until size ~= -1 ]]

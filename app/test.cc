@@ -22,20 +22,22 @@ SOFTWARE. */
 
 #include <iostream>
 #include <fstream>
+#include <map>
 
-#include <unistd.h>
 #include <signal.h>
 
-#include <arpa/inet.h>
-#include <ZeroTier.h>
+#include <ZeroTierSockets.h>
 
 #include <zt_lua_wrap.h>
 #include <config_reader.h>
 
 static int node_ready = false, network_ready = false;
 
-auto callback_func(zts_callback_msg *msg)
+constexpr uint16_t ZTS_PORT = 9994;
+
+auto callback_func(void *message) -> void
 {
+    zts_callback_msg *msg = static_cast<zts_callback_msg *>(message);
     if(msg->eventCode == ZTS_EVENT_NODE_ONLINE)
     {
         std::cout << "Node " << std::hex << msg->node->address << " is online" << std::endl;
@@ -64,27 +66,21 @@ auto callback_func(zts_callback_msg *msg)
         network_ready = true;
         return;
     }
-    if(msg->eventCode == ZTS_EVENT_NETWORK_REQUESTING_CONFIG)
+    if(msg->eventCode == ZTS_EVENT_NETWORK_REQ_CONFIG)
     {
         std::cout << "Requesting network configuration" << std::endl;
         return;
     }
-    if(msg->eventCode == ZTS_EVENT_PEER_P2P)
+    if(msg->eventCode == ZTS_EVENT_PEER_DIRECT)
     {
-        std::cout << std::hex << msg->peer->address << " ready for P2P" << std::endl;
+        std::cout << std::hex << msg->peer->address << " ready for Direct communication" << std::endl;
         return;
     }
 }
 
-namespace
-{
-
-static constexpr int PORT = 9000;
-
-} // namespace 
-
 auto ctrl_c_handler(int signal) -> void
 {
+    zt_lua::stop();
     zts_stop();
     exit(1);
 }
@@ -108,28 +104,42 @@ auto main(int argc, char *argv[]) -> int
     {
         std::map<std::string, std::string> conf_map = zt_lua::read_conf(conf);
         std::cout << "Starting" << std::endl;
-        zts_start("zt_runtime", callback_func, ZTS_DEFAULT_PORT);
-        while(!node_ready) { sleep(1); }
-
-        std::cout << "Joining" << std::endl;
-        uint64_t nwid = std::stoull(conf_map["network_id"]);
-        zts_join(nwid);
-        while(!network_ready) { sleep(1); }
-        
-
-        zt_lua::start(nwid);
-
-        lua_State *l = luaL_newstate();
-        zt_lua::register_wrappers(l);
-        luaL_openlibs(l);
-
-        if(luaL_dofile(l, "lua.lua"))
+        int err;
+        if((err = zts_start("zt_runtime", callback_func, ZTS_PORT)) == ZTS_ERR_OK)
         {
-            std::cerr << "Couldn't do lua file" << std::endl;
-        }
+            while(!node_ready) { zts_delay_ms(50); }
 
-        zt_lua::stop();
-        zts_stop();
+            std::cout << "Joining" << std::endl;
+            uint64_t nwid = std::stoull(conf_map["network_id"], 0, 16);
+            std::cout << "network_id: " << std::hex << nwid << std::endl;
+            if((err = zts_join(nwid)) == ZTS_ERR_OK)
+            {
+                while(!network_ready) { zts_delay_ms(50); }
+
+                zt_lua::start(nwid);
+
+                lua_State *l = luaL_newstate();
+                zt_lua::register_wrappers(l);
+                luaL_openlibs(l);
+
+                if(luaL_dofile(l, "lua.lua"))
+                {
+                    std::cerr << "Couldn't do lua file" << std::endl;
+                }
+
+                zt_lua::stop();
+            }
+            else
+            {
+                std::cerr << "Couldn't join the netowkr: err: " << err << " zts_errno: " << zts_errno << std::endl;
+            }
+            
+            zts_stop();
+        }
+        else
+        {
+            std::cerr << "Couldn't start ZeroTier service: error: " << err << " zts_errno: " << zts_errno << std::endl;
+        }
     }
 
     return 0;

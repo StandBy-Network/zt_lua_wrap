@@ -1,9 +1,17 @@
 path=$1
+debug=$2
 if [ ! -d "$path" ]; then
     mkdir $path
 fi
-ext_path="ext/libzt/lib/release/linux-x86_64"
-cp build/test $ext_path/libzt.so $path
-echo "export LD_LIBRARY_PATH=\"./\":\$LD_LIBRARY_PATH" >> $path/RUN
-echo "./test" >> $path/RUN
+conf=""
+if [ "$debug" == "d" ]; then
+    conf="debug"
+else
+    conf="release"
+fi
+
+ext_path="ext/libzt/lib/$conf/linux-x86_64"
+cp build/test $ext_path/libzt.so app/config app/lua.lua $path
+echo "export LD_LIBRARY_PATH=\"./\":\$LD_LIBRARY_PATH" > $path/RUN
+echo "./test ./config" >> $path/RUN
 sudo chmod a+x $path/RUN

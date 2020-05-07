@@ -33,19 +33,17 @@ SOFTWARE. */
 #include <unistd.h>
 
 #include <arpa/inet.h>
-#include <ZeroTier.h>
+#include <ZeroTierSockets.h>
 
 namespace zt_lua
 {
 
 using msg_map_t = std::map<uint64_t, std::queue<std::string>>;
-using thread_vec_t = std::vector<std::thread>;
 
 std::mutex msg_map_mut;
 msg_map_t msg_map;
 
-std::mutex threads_mut;
-thread_vec_t threads;
+std::thread thread;
 
 constexpr int MSG_MAX_LENGTH = 10000;
 
@@ -65,7 +63,7 @@ auto register_wrappers(lua_State *l) -> void
 
 auto create_sock() -> int
 {
-    return zts_socket(ZTS_PF_INET6, ZTS_SOCK_STREAM, 0);
+    return zts_socket(ZTS_PF_INET6, ZTS_SOCK_DGRAM, 0);
 }
 
 auto push_msg(const uint64_t node_id, const std::string &msg) -> void
@@ -79,9 +77,14 @@ auto pop_msg(uint64_t node_id) -> std::optional<std::string>
     std::lock_guard<std::mutex> lock(msg_map_mut);
     try
     {
-        const std::string s = msg_map.at(node_id).front();
-        msg_map.at(node_id).pop();
-        return s;
+        auto q = msg_map.at(node_id);
+        if(!q.empty())
+        {
+            const std::string s = q.front();
+            q.pop();
+            return s;
+        }
+        return std::nullopt;
     }
     catch(const std::out_of_range &)
     {
@@ -92,12 +95,12 @@ auto pop_msg(uint64_t node_id) -> std::optional<std::string>
 auto id_to_addr_str(uint64_t node_id) -> std::string
 {
     std::stringstream ss;
-    ss << "fd" << network_id << "9993" << node_id;
+    ss << "fd" << std::hex << network_id << "9993" << node_id;
     std::string out;
     for(int i = 0; i < ss.str().length(); i++)
     {
         out.push_back(ss.str()[i]);
-        if(i % 4 == 3)
+        if(i % 4 == 3 && i < ss.str().length() - 1)
         {
             out.push_back(':');
         }
@@ -126,20 +129,29 @@ auto addr_str_to_id(const std::string addr) -> uint64_t
     return std::stoull(id_string, 0, 16);
 }
 
-auto addr_to_string(zts_sockaddr_in6 *addr) -> const std::string
+auto addr_to_string(zts_sockaddr_in6 *addr) -> std::optional<std::string>
 {
-    char ad[INET6_ADDRSTRLEN];
-    inet_ntop(ZTS_AF_INET6, &(addr->sin6_addr), ad, INET6_ADDRSTRLEN);
-    std::string s(ad);
+    char ad[ZTS_INET6_ADDRSTRLEN];
+    if(zts_inet_ntop(ZTS_AF_INET6, &(addr->sin6_addr), ad, ZTS_INET6_ADDRSTRLEN))
+    {
+        std::string s(ad);
 
-    return s;
+        return s;
+    }
+    return std::nullopt;
 }
 
-auto string_to_addr(const std::string str) -> zts_sockaddr_in6
+auto string_to_addr(const std::string str) -> std::optional<zts_sockaddr_in6>
 {
     zts_sockaddr_in6 addr;
-    inet_pton(ZTS_AF_INET6, str.c_str(), &addr.sin6_addr);
-    return addr;
+    if(zts_inet_pton(ZTS_AF_INET6, str.c_str(), &addr.sin6_addr) > 0)
+    {
+        addr.sin6_family = ZTS_AF_INET6;
+        return addr;
+    }
+    
+    return std::nullopt;
+    
 }
 
 auto lstring_to_string(const char *lstr, int len) -> const std::string
@@ -158,56 +170,59 @@ auto listener() -> void
     // This lock in my opinion/theoretically guarantees, that no one is going to be able to manipulate the 
     // threads vector until this function returns, if they use the mutex anyway, and that means, until 
     // zt_lua::stop() is called;
-    std::lock_guard lock(threads_mut);
     int recv_fd;
     if((recv_fd = create_sock()) < 0)
     {
-        std::cerr << "Couldn't create socket to listen on" << std::endl;
+        std::cerr << "Couldn't create socket to listen on: err: " << recv_fd << " zts_errno: " << zts_errno << std::endl;
         return;
     }
 
-    zts_sockaddr_in6 addr = string_to_addr("::");
-    addr.sin6_family = ZTS_AF_INET6;
-    addr.sin6_port = htons(PORT);
-    if(zts_bind(recv_fd, (const sockaddr *)&addr, sizeof(addr)) < 0)
+    int err;
+    if((err = zts_fcntl(recv_fd, ZTS_F_SETFL, ZTS_O_NONBLOCK)) < 0)
     {
-        std::cerr << "Couldn't bind to \"any_address\"" << std::endl;
+        std::cerr << "Couldn't set socket to be non blocking: err: " << err << " zts_errno: " << zts_errno << std::endl;
         zts_close(recv_fd);
         return;
     }
 
-    if(zts_listen(recv_fd, 5) < 0)
+    auto opt = string_to_addr("::");
+    if(static_cast<bool>(opt))
     {
-        std::cerr << "Couldn't start listening" << std::endl;
-        zts_close(recv_fd);
-        return;
-    }
-
-    while(run)
-    {
-        zts_sockaddr_in6 addr;
-        int addr_len;
-        int acc_fd;
-        if((acc_fd = zts_accept(recv_fd, (sockaddr *)&addr, (socklen_t *)&addr_len)) < 0)
+        zts_sockaddr_in6 addr = opt.value();
+        addr.sin6_port = zts_htons(PORT);
+        if((err = zts_bind(recv_fd, (const zts_sockaddr *)&addr, sizeof(addr))) < 0)
         {
-            std::cerr << "Couldn't accept any connection" << std::endl;
-            continue;
+            std::cerr << "Couldn't bind to \"any_address\": err: " << err << " zts_errno: " << zts_errno << std::endl;
+            zts_close(recv_fd);
+            return;
         }
 
-        threads.emplace_back([acc_fd, &addr]()
+        while(run)
         {
             char msg[MSG_MAX_LENGTH];
             int recvd;
-            while((recvd = zts_recv(acc_fd, msg, MSG_MAX_LENGTH, 0)) > 0)
+            zts_sockaddr_in6 recv_addr;
+            zts_socklen_t recv_addr_len = sizeof(recv_addr);
+            if((recvd = zts_recvfrom(recv_fd, msg, MSG_MAX_LENGTH, 0, (zts_sockaddr *)&recv_addr, &recv_addr_len)) > 0)
             {
-                std::lock_guard lock(msg_map_mut);
-                std::string s = addr_to_string(&addr);
-                std::cout << s << std::endl;
-                push_msg(addr_str_to_id(addr_to_string(&addr).c_str()), lstring_to_string(msg, recvd));
-            }
-            zts_close(acc_fd);
-        });
+                auto maybe = addr_to_string(&recv_addr);
+                if(static_cast<bool>(maybe))
+                {
+                    std::string s = maybe.value();
+                    push_msg(addr_str_to_id(s), lstring_to_string(msg, recvd));
+                }
+                else
+                {
+                    std::cerr << "Wrong address from zts_accept or addr_to_string is malfuncioning" << std::endl;
+                }
+            };
+        }
     }
+    else
+    {
+        std::cerr << "Wrong address string entered" << std::endl;
+    }
+    
     zts_close(recv_fd);
 }
 
@@ -217,7 +232,7 @@ auto start(uint64_t nwid) -> void
     {
         network_id = nwid;
         run = true;
-        threads.emplace_back(listener);
+        thread = std::thread(listener);
     }
 }
 
@@ -226,13 +241,9 @@ auto stop() -> void
     if(run)
     {
         run = false;
-        std::lock_guard lock(threads_mut);
-        for(auto &t : threads)
+        if(thread.joinable())
         {
-            if(t.joinable())
-            {
-                t.join();
-            }
+            thread.join();
         }
     }
 }
@@ -255,47 +266,36 @@ auto send(lua_State *l) -> int
             }
             int max_tries = 10;
             int tries = 0;
-            zts_sockaddr_in6 addr = string_to_addr(id_to_addr_str(node_id));
-            addr.sin6_family = ZTS_AF_INET6;
-            addr.sin6_port = htons(PORT);
-            // connect
-            for(; tries < max_tries; tries++)
+            int err;
+            /* zts_sockaddr_storage test;
+            if((err = zts_get_rfc4193_addr(&test, network_id, node_id)) != ZTS_ERR_OK)
             {
-                if(zts_connect(fd, (const sockaddr *)&addr, sizeof(addr)) < 0)
+                lua_pushinteger(l, -1);
+                lua_pushstring(l, "Couldn't get address based on node id");
+                return 2;
+            } */
+            auto opt = string_to_addr(id_to_addr_str(node_id));
+            if(static_cast<bool>(opt))
+            {
+                zts_sockaddr_in6 addr = opt.value();
+                addr.sin6_port = zts_htons(PORT);
+                // send
+                int sent;
+                if((sent = zts_sendto(fd, msg.c_str(), msg.length(), 0, (const zts_sockaddr *)&addr, sizeof(addr))) < 0)
                 {
-                    zts_close(fd);
-                    if((fd = create_sock()) < 0)
-                    {
-                        lua_pushinteger(l, -1);
-                        lua_pushstring(l, "Couldn't create socket for sending");
-                        return 2;
-                    }
-                    sleep(1);
-                    continue;
+                    lua_pushinteger(l, -1);
+                    lua_pushstring(l, "Couldn't send any data");
+                    return 2;
                 }
-                break;
-            }
-            if(tries == max_tries)
-            {
-                lua_pushinteger(l, -1);
-                std::string s = std::string("Couldn't connect after ") + std::to_string(tries) + " attempts";
-                lua_pushstring(l, s.c_str());
+                // close fd
                 zts_close(fd);
-                return 2;
+                // return bytes sent
+                lua_pushinteger(l, sent);
+                return 1;
             }
-            // send
-            int sent;
-            if((sent = zts_send(fd, msg.c_str(), msg.length(), 0)) < 0)
-            {
-                lua_pushinteger(l, -1);
-                lua_pushstring(l, "Couldn't send any data");
-                return 2;
-            }
-            // close fd
-            zts_close(fd);
-            // return bytes sent
-            lua_pushinteger(l, sent);
-            return 1;
+            lua_pushinteger(l, -1);
+            lua_pushstring(l, "id_to_addr_str or string_to_addr is malfunctioning");
+            return 2;
         }
         else
         {
@@ -324,13 +324,15 @@ auto recv(lua_State *l) -> int
         // return message from the queue
         uint64_t node_id = lua_tointeger(l, -1);
         auto opt = pop_msg(node_id);
-        std::string s = "";
         if(static_cast<bool>(opt))
         {
-            s = opt.value();
+            std::string s = opt.value();
+            lua_pushinteger(l, s.length());
+            lua_pushlstring(l, s.c_str(), s.length());
+            return 2;
         }
-        lua_pushinteger(l, s.length());
-        lua_pushlstring(l, s.c_str(), s.length());
+        lua_pushinteger(l, -1);
+        lua_pushstring(l, "No message in queue");
         return 2;
     }
     else

@@ -1,2 +1,3 @@
 ./CLEAN
-./BUILD
+./BUILD $1
+ln ./app/lua.lua ./build/lua.lua
