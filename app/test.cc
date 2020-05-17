@@ -80,7 +80,6 @@ auto callback_func(void *message) -> void
 
 auto ctrl_c_handler(int signal) -> void
 {
-    zt_lua::stop();
     zts_stop();
     exit(1);
 }
@@ -116,18 +115,16 @@ auto main(int argc, char *argv[]) -> int
             {
                 while(!network_ready) { zts_delay_ms(50); }
 
-                zt_lua::start(nwid);
+                standby_network::ZTLua ztlua(nwid);
 
                 lua_State *l = luaL_newstate();
-                zt_lua::register_wrappers(l);
+                ztlua.register_wrappers(l);
                 luaL_openlibs(l);
-
+                
                 if(luaL_dofile(l, "lua.lua"))
                 {
-                    std::cerr << "Couldn't do lua file" << std::endl;
+                    std::cerr << "Couldn't do lua file: " << lua_tostring(l, -1) << std::endl;
                 }
-
-                zt_lua::stop();
             }
             else
             {

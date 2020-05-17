@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "--std=c++17 -g -pthread")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 
-set(SOURCES lib/zt_lua_wrap.cc lib/config_reader.cc)
-set(TEST_SOURCES app/test.cc)
+set(SOURCES lib/zt_lua_wrap.cc lib/comm_layer.cc)
+set(TEST_SOURCES app/test.cc lib/config_reader.cc)
 
 add_library(zt_lua_wrap STATIC ${SOURCES})
 

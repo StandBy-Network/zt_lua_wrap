@@ -28,9 +28,15 @@ SOFTWARE. ]]
     print("sent pong")
 until size ~= -1 ]]
 
-for i = 0, 49999, 1 do
-    size, msg = recv(0X98646573D4)
-    print("received " .. msg .. " size " .. tostring(size))
+for i = 0, 10000000, 1 do
+    err, err_msg = udp_recv(0XF6EE77EEE7)
+    if err then
+        if err_msg then
+            print("error " .. err_msg)
+        else
+            print(err)
+        end
+    end
 end
 
 --The other side

@@ -23,20 +23,32 @@ SOFTWARE. */
 #ifndef _ZT_LUA_WRAP_H_
 #define _ZT_LUA_WRAP_H_
 
-#include <bits/stdint-uintn.h>
-
 #include <lua.hpp>
 
-namespace zt_lua
+#include <comm_layer.h>
+
+namespace standby_network
 {
 
-auto start(uint64_t network_id) -> void;
-auto stop() -> void;
+class ZTLua
+{
+public:
+    ZTLua(uint64_t nwid, int port = 9000);
+    ZTLua(const ZTLua &) = delete;
+    ZTLua(ZTLua &&move);
+    ~ZTLua();
 
-auto register_wrappers(lua_State *l) -> void;
+public:
+    auto operator=(const ZTLua &) -> const ZTLua & = delete;
+    auto operator=(ZTLua &&move) -> const ZTLua &;
 
-auto send(lua_State *l) -> int;
-auto recv(lua_State *l) -> int;
+public:
+    auto register_wrappers(lua_State *l) -> void;
+
+private:
+    CommLayer c;
+};
+
 
 } // namespace zt_lua
 
